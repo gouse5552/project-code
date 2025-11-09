@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Car Racing Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+            background: #1a1a1a;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(to bottom, #87CEEB 0%, #E0F6FF 100%);
+            overflow: hidden;
+        }
+        
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.7);
+            z-index: 10;
+        }
+        
+        #ui div {
+            margin-bottom: 10px;
+            background: rgba(0,0,0,0.5);
+            padding: 8px 12px;
+            border-radius: 5px;
+            min-width: 200px;
+        }
+        
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            color: #fff;
+            padding: 40px;
+            border-radius: 15px;
+            text-align: center;
+            display: none;
+            z-index: 20;
+            min-width: 300px;
+        }
+        
+        #gameOver h1 {
+            font-size: 48px;
+            margin-bottom: 20px;
+            color: #ff6b6b;
+        }
+        
+        #gameOver p {
+            font-size: 24px;
+            margin: 15px 0;
+        }
+        
+        #gameOver button {
+            margin-top: 20px;
+            padding: 12px 30px;
+            font-size: 18px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        #gameOver button:hover {
+            background: #45a049;
+        }
+        
+        #instructions {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            color: #fff;
+            padding: 15px;
+            border-radius: 5px;
+            font-size: 14px;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="ui">
+            <div>Speed: <span id="speed">0</span> km/h</div>
+            <div>Position: <span id="distance">0</span> m</div>
+            <div>Fuel: <span id="fuel">100</span>%</div>
+            <div>Health: <span id="health">100</span>%</div>
+            <div>Lap Time: <span id="lapTime">0:00</span></div>
+        </div>
+        <div id="gameOver">
+            <h1 id="gameOverTitle">GAME OVER</h1>
+            <p id="gameOverText">You crashed!</p>
+            <p>Final Distance: <span id="finalDistance">0</span>m</p>
+            <p>Time Survived: <span id="finalTime">0:00</span></p>
+            <button onclick="location.reload()">Play Again</button>
+        </div>
+        <div id="instructions">
+            <strong>Controls:</strong><br>
+            Arrow Keys: Move<br>
+            Space: Brake<br>
+            Avoid obstacles!
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Game states
+        const gameState = {
+            isRunning: true,
+            startTime: Date.now(),
+            distance: 0,
+            speed: 0,
+            fuel: 100,
+            health: 100,
+            score: 0
+        };
+
+        // Player car
+        const player = {
+            x: canvas.width / 2,
+            y: canvas.height - 100,
+            width: 40,
+            height: 60,
+            vx: 0,
+            vy: 0,
+            maxSpeed: 15,
+            acceleration: 0.5,
+            friction: 0.92,
+            rotation: 0
+        };
+
+        // Keyboard input
+        const keys = {};
+        window.addEventListener('keydown', (e) => keys[e.key] = true);
+        window.addEventListener('keyup', (e) => keys[e.key] = false);
+
+        // Road markings
+        let roadOffset = 0;
+
+        // Obstacles
+        let obstacles = [];
+        let obstacleSpawnRate = 0.02;
+
+        // Coins/Fuel pickups
+        let pickups = [];
+        let pickupSpawnRate = 0.01;
+
+        class Obstacle {
+            constructor() {
+                this.width = 40;
+                this.height = 60;
+                this.x = Math.random() * (canvas.width - this.width);
+                this.y = -this.height;
+                this.vy = 3 + Math.random() * 2;
+            }
+
+            update() {
+                this.y += this.vy;
+            }
+
+            draw() {
+                ctx.fillStyle = '#ff4444';
+                ctx.shadowColor = '#ff0000';
+                ctx.shadowBlur = 10;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.fillStyle = '#ffff00';
+                ctx.fillRect(this.x + 5, this.y + 5, 10, 10);
+                ctx.fillRect(this.x + 25, this.y + 5, 10, 10);
+                ctx.fillRect(this.x + 5, this.y + 45, 10, 10);
+                ctx.fillRect(this.x + 25, this.y + 45, 10, 10);
+                ctx.shadowColor = 'transparent';
+            }
+
+            isOffScreen() {
+                return this.y > canvas.height;
+            }
+        }
+
+        class Pickup {
+            constructor() {
+                this.width = 20;
+                this.height = 20;
+                this.x = Math.random() * (canvas.width - this.width);
+                this.y = -this.height;
+                this.vy = 2;
+            }
+
+            update() {
+                this.y += this.vy;
+            }
+
+            draw() {
+                ctx.fillStyle = '#00ff00';
+                ctx.shadowColor = '#00ff00';
+                ctx.shadowBlur = 15;
+                ctx.beginPath();
+                ctx.arc(this.x + this.width / 2, this.y + this.height / 2, this.width / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowColor = 'transparent';
+            }
+
+            isOffScreen() {
+                return this.y > canvas.height;
+            }
+        }
+
+        function updatePlayer() {
+            if (keys['ArrowUp']) {
+                player.vy = Math.max(player.vy - player.acceleration, -player.maxSpeed);
+            }
+            if (keys['ArrowDown']) {
+                player.vy = Math.min(player.vy + player.acceleration, player.maxSpeed * 0.5);
+            }
+            if (keys['ArrowLeft']) {
+                player.vx = Math.max(player.vx - player.acceleration, -player.maxSpeed * 0.7);
+            }
+            if (keys['ArrowRight']) {
+                player.vx = Math.min(player.vx + player.acceleration, player.maxSpeed * 0.7);
+            }
+            if (keys[' ']) {
+                player.vy *= 0.85;
+                player.vx *= 0.90;
+            }
+
+            player.vx *= player.friction;
+            player.vy *= player.friction;
+
+            player.x += player.vx;
+            player.y += player.vy;
+
+            player.x = Math.max(0, Math.min(canvas.width - player.width, player.x));
+            player.y = Math.max(0, Math.min(canvas.height - player.height, player.y));
+
+            gameState.speed = Math.abs(player.vy);
+            gameState.distance += gameState.speed;
+            gameState.fuel = Math.max(0, gameState.fuel - gameState.speed * 0.05);
+
+            if (gameState.fuel <= 0) {
+                gameState.health = 0;
+            }
+        }
+
+        function checkCollisions() {
+            for (let obs of obstacles) {
+                if (player.x < obs.x + obs.width &&
+                    player.x + player.width > obs.x &&
+                    player.y < obs.y + obs.height &&
+                    player.y + player.height > obs.y) {
+                    gameState.health -= 25;
+                    obstacles = obstacles.filter(o => o !== obs);
+                    if (gameState.health <= 0) {
+                        endGame();
+                    }
+                }
+            }
+
+            for (let pickup of pickups) {
+                if (player.x < pickup.x + pickup.width &&
+                    player.x + player.width > pickup.x &&
+                    player.y < pickup.y + pickup.height &&
+                    player.y + player.height > pickup.y) {
+                    gameState.fuel = Math.min(100, gameState.fuel + 30);
+                    gameState.score += 100;
+                    pickups = pickups.filter(p => p !== pickup);
+                }
+            }
+        }
+
+        function drawRoad() {
+            ctx.fillStyle = '#333333';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = '#444444';
+            ctx.fillRect(canvas.width * 0.15, 0, canvas.width * 0.7, canvas.height);
+
+            ctx.strokeStyle = '#ffff00';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([20, 10]);
+            ctx.beginPath();
+            ctx.moveTo(canvas.width / 2, roadOffset);
+            ctx.lineTo(canvas.width / 2, roadOffset + canvas.height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            roadOffset = (roadOffset + gameState.speed) % canvas.height;
+        }
+
+        function drawPlayer() {
+            ctx.save();
+            ctx.translate(player.x + player.width / 2, player.y + player.height / 2);
+            ctx.rotate(Math.atan2(player.vx, -player.vy));
+
+            ctx.fillStyle = '#ff6b6b';
+            ctx.fillRect(-player.width / 2, -player.height / 2, player.width, player.height);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(-player.width / 2 + 5, -player.height / 2 + 5, player.width - 10, 15);
+
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(-player.width / 2 + 8, -player.height / 2 + 8, 6, 6);
+            ctx.fillRect(player.width / 2 - 14, -player.height / 2 + 8, 6, 6);
+
+            ctx.restore();
+        }
+
+        function update() {
+            if (!gameState.isRunning) return;
+
+            updatePlayer();
+
+            if (Math.random() < obstacleSpawnRate) {
+                obstacles.push(new Obstacle());
+                obstacleSpawnRate = Math.min(0.05, obstacleSpawnRate + 0.002);
+            }
+
+            if (Math.random() < pickupSpawnRate) {
+                pickups.push(new Pickup());
+            }
+
+            obstacles.forEach(obs => obs.update());
+            pickups.forEach(pickup => pickup.update());
+
+            obstacles = obstacles.filter(obs => !obs.isOffScreen());
+            pickups = pickups.filter(p => !p.isOffScreen());
+
+            checkCollisions();
+
+            updateUI();
+        }
+
+        function draw() {
+            drawRoad();
+
+            obstacles.forEach(obs => obs.draw());
+            pickups.forEach(pickup => pickup.draw());
+
+            drawPlayer();
+        }
+
+        function updateUI() {
+            document.getElementById('speed').textContent = Math.round(gameState.speed * 5);
+            document.getElementById('distance').textContent = Math.round(gameState.distance);
+            document.getElementById('fuel').textContent = Math.round(gameState.fuel);
+            document.getElementById('health').textContent = Math.round(gameState.health);
+
+            const elapsed = Math.floor((Date.now() - gameState.startTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            document.getElementById('lapTime').textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        function endGame() {
+            gameState.isRunning = false;
+            const elapsed = Math.floor((Date.now() - gameState.startTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            document.getElementById('finalDistance').textContent = Math.round(gameState.distance);
+            document.getElementById('finalTime').textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        gameLoop();
+    </script>
+</body>
+</html>
